@@ -1,23 +1,31 @@
 #!/usr/bin/python
+"""
+Runs a program and opens ports as needed and allowed by the
+configuration file.
+"""
 import pynotify
 import sys
 import os
 import subprocess
-from time import sleep
 
-def getAppPath():
+CONFIG_FILE = "/etc/punchfw.cfg"
+SUDO_PATH = "/usr/bin/sudo"
+HELPER_PATH = "/usr/local/sbin/punchfw_helper.py"
+
+
+def get_app_path():
     """
     Get the path to the application
     """
     return sys.argv[1]        
 
-def getAppName():
+def get_app_name():
     """
     Get the name of the application
     """
     return os.path.basename(sys.argv[1]).capitalize()
 
-def getAppArgs():
+def get_app_args():
     """
     Get application's arguments
     """
@@ -26,7 +34,7 @@ def getAppArgs():
         app_args.append(sys.argv[i])
     return app_args
 
-def printNotify(app, action, proto, port, completed=True):
+def print_notify(app, action, proto, port, completed=True):
     """
     Send a notification to the notifications daemon of an opened/closed port
     """
@@ -38,34 +46,34 @@ def printNotify(app, action, proto, port, completed=True):
     notification.set_hint_string("x-canonical-append", "")
     notification.show()
     
-def forkWatcher(app_pid, app_name):
+def fork_watcher(app_pid, app_name):
     """
     Fork the watcher process and run the helper
     This does all of the actual work
     """
     watcher_pid = os.fork()
     if watcher_pid == 0:
-        watcher = subprocess.Popen(["sudo", "/usr/local/sbin/punchfw-helper.py", str(app_pid)], executable="/usr/bin/sudo", stdout=subprocess.PIPE)
-        #watcher = subprocess.Popen(["/bin/ping", "google.com"], stdout=subprocess.PIPE)
-        #watcher = subprocess.Popen(["/home/steb/Desktop/punchfw-helper.py", str(app_pid)], stdout=subprocess.PIPE)
+        cmd = [SUDO_PATH, HELPER_PATH, str(app_pid)]
+        watcher = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         try:
             while watcher.poll() is None:
-                watcher_out = watcher.stdout.readline().split(' ')
+                watcher_out = watcher.stdout.readline()[:-1].split(' ')
+                if not watcher_out[0]:
+                    break
                 action = watcher_out[0]
                 proto = watcher_out[1]
                 port = int(watcher_out[2])
                 completed = bool(watcher_out[3])
-                printNotify(app_name, action, proto, port, completed)
+                print_notify(app_name, action, proto, port, completed)
         except KeyboardInterrupt:
             watcher_out = watcher.stdout.readlines()
-            print watcher_out
             for line in watcher_out:
                 parts = line.split(' ')
                 action = parts[0]
                 proto = parts[1]
                 port = int(parts[2])
                 completed = bool(parts[3])
-                printNotify(app_name, action, proto, port, completed) 
+                print_notify(app_name, action, proto, port, completed) 
             watcher.wait()
         sys.exit(0)
         return 0
@@ -73,29 +81,29 @@ def forkWatcher(app_pid, app_name):
         return watcher_pid
 
     
-def runApp(app_path, app_args):
+def run_app(app_path, app_args):
     """
     Run the Application
     """
     try:
         os.execvp(app_path, app_args)
-    except:
+    except OSError:
         return False
 def main_function():
     """
     Main Thread
     """
     pynotify.init("PunchFW")
-    app_path = getAppPath()
-    app_args = getAppArgs()
-    app_name = getAppName()
-    watcher_pid = forkWatcher(os.getpid(), app_name)
-    if not runApp(app_path, app_args):
+    app_path = get_app_path()
+    app_args = get_app_args()
+    app_name = get_app_name()
+    watcher_pid = fork_watcher(os.getpid(), app_name)
+    if not run_app(app_path, app_args):
         os.kill(watcher_pid, 15)
     sys.exit(0)
     
 if __name__ == "__main__":
-    if not os.path.exists("/etc/punchfw.cfg"):
+    if not os.path.exists(CONFIG_FILE):
         print "You need to create a configuration file"
         exit(1)
     main_function()
