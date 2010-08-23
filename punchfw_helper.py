@@ -12,8 +12,8 @@ import ConfigParser
 CONFIG_FILE = "/etc/punchfw.cfg"
 OPEN_CMD = "/usr/sbin/iptables -A INPUT -p {proto} --dport {dport} -j ACCEPT"
 CLOSE_CMD = "/usr/sbin/iptables -D INPUT -p {proto} --dport {dport} -j ACCEPT"
-NETSTAT_PATH = "/bin/netstat"
-# lsof -p 16809 -a -i -Pln -a -u `whoami` -FPn
+NETSTAT_CMD = "/bin/netstat -lnp"
+#LSOF_CMD = "lsof -p %d -a -i -Pln -FPn"
 NETSTAT_PATTERN = r"""
 (?P<proto>udp|tcp)              #*Match the protocol
 (?:\ *[0-9]*){2}                # Match the Recv/Send-Q
@@ -40,8 +40,7 @@ def get_open_ports(port_finder):
     List open ports using the port_finder re.
     """
     ports_new = set ()
-    cmd = [NETSTAT_PATH, "-lnp"]
-    netstat = Popen(cmd, stdout = PIPE)
+    netstat = Popen(NETSTAT_CMD.split(), stdout = PIPE)
     netstat.wait()
     netstat_ports = port_finder(netstat.communicate()[0])
     for port in netstat_ports:
@@ -80,7 +79,7 @@ def update_firewall(to_open=None, to_close=None):
     if to_open:
         for port in to_open:
             cmd = OPEN_CMD.format(proto = port[0], dport = port[1])
-            iptables = Popen(cmd, shell = True, stdout = PIPE)
+            iptables = Popen(cmd.split(), stdout = PIPE)
             iptables.wait()
             if iptables.poll() == 0:
                 print_notify("open", port[0], port[1], True)
@@ -90,7 +89,7 @@ def update_firewall(to_open=None, to_close=None):
     if to_close:
         for port in to_close:
             cmd = CLOSE_CMD.format(proto = port[0], dport = port[1])
-            iptables = Popen(cmd, shell = True, stdout = PIPE)
+            iptables = Popen(cmd.split(), stdout = PIPE)
             iptables.wait()
             if iptables.poll() == 0:
                 print_notify("close", port[0], port[1], True)
