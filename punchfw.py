@@ -80,7 +80,6 @@ def fork_watcher(app_pid, app_name):
     else:
         return watcher_pid
 
-    
 def run_app(app_path, app_args):
     """
     Run the Application

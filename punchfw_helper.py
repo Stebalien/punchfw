@@ -6,28 +6,13 @@ import os
 import sys
 from subprocess import Popen, PIPE
 from time import sleep
-import re
 import ConfigParser
 
 CONFIG_FILE = "/etc/punchfw.cfg"
 OPEN_CMD = "/usr/sbin/iptables -A INPUT -p {proto} --dport {dport} -j ACCEPT"
 CLOSE_CMD = "/usr/sbin/iptables -D INPUT -p {proto} --dport {dport} -j ACCEPT"
-NETSTAT_CMD = "/bin/netstat -lnp"
-#LSOF_CMD = "lsof -p %d -a -i -Pln -FPn"
-NETSTAT_PATTERN = r"""
-(?P<proto>udp|tcp)              #*Match the protocol
-(?:\ *[0-9]*){2}                # Match the Recv/Send-Q
-\ *                             # Space before local address
-(?:0\.){3}0                     # The local address must be 0.0.0.0
-:                               # The colon before the port
-(?P<port>[0-9]*)                #*The local port
-\ *                             # Space before foreign address
-(?:[0-9]{1,3}\.){3}[0-9]{1,3}   # The forign address
-:                               # The colon before the port
-(?:\*|[0-9]*)                   # The foreign port
-\ *[A-Z]*                       # The connection state
-\ *%d/                          #*The application PID
-"""
+LSOF_CMD = "lsof -p {pid} -a -i -Pln -FPn"
+
 def print_notify(action, proto, port, completed=True):
     """
     Send status to client.
@@ -35,86 +20,90 @@ def print_notify(action, proto, port, completed=True):
     sys.stdout.write("%s %s %d %d\n" % (action, proto, port, completed))
     sys.stdout.flush()
    
-def get_open_ports(port_finder):
+def get_open_ports(lsof_cmd):
     """
     List open ports using the port_finder re.
     """
-    ports_new = set ()
-    netstat = Popen(NETSTAT_CMD.split(), stdout = PIPE)
-    netstat.wait()
-    netstat_ports = port_finder(netstat.communicate()[0])
-    for port in netstat_ports:
-        ports_new.add((port[0], int (port[1])))
+    ports_new = set()
+    lsof = Popen(lsof_cmd.split(), stdout=PIPE, stderr=PIPE)
+    lsof.wait()
+    for line in lsof.communicate()[0].splitlines():
+        if line[0] == 'P':
+            proto = line[1:].lower()
+        elif line[:2] == 'n*':
+            try:
+                port = int(line[3:])
+            except ValueError:
+                continue
+            ports_new.add((proto, port))
     return ports_new
 
-def update_ports(port_finder, app_path):
+def update_ports(lsof_cmd, allowed_ports):
     """
     Cycle
     """
-    ports_new = get_open_ports(port_finder)
+    ports_new = get_open_ports(lsof_cmd)
     if not ports_new:
         return
-    ports_new.intersection_update(ALLOWED_APPS[app_path])
+    ports_new.intersection_update(allowed_ports)
     if not ports_new:
         return
     to_open = ports_new - PORTS
     to_close = PORTS - ports_new
-    if to_open or to_close:
-        update_firewall(to_open, to_close)
-       
-def sub_list(list2, list1):
+
+    for port in to_open:
+        status = fw_open(port)
+        print_notify("open", port[0], port[1], status)
+    for port in to_close:
+        status = fw_close(port)
+        print_notify("close", port[0], port[1], status)
+
+def fw_open(port):
     """
-    Subtract list2 from list1
+    Close a port
     """
-    list_new = list()
-    for item in list1:
-        if item not in list2:
-            list_new.append(item)
-    return list_new
-    
-def update_firewall(to_open=None, to_close=None):
+    cmd = OPEN_CMD.format(proto = port[0], dport = port[1])
+    iptables = Popen(cmd.split(), stdout = PIPE, stderr = PIPE)
+    iptables.wait()
+    if iptables.poll() == 0:
+        PORTS.add(port)
+        return True
+    else:
+        return False
+
+def fw_close(port):
     """
-    Update Firewall Rules
+    Close a port
     """
-    if to_open:
-        for port in to_open:
-            cmd = OPEN_CMD.format(proto = port[0], dport = port[1])
-            iptables = Popen(cmd.split(), stdout = PIPE)
-            iptables.wait()
-            if iptables.poll() == 0:
-                print_notify("open", port[0], port[1], True)
-                PORTS.add(port)
-            else:
-                print_notify("open", port[0], port[1], False)
-    if to_close:
-        for port in to_close:
-            cmd = CLOSE_CMD.format(proto = port[0], dport = port[1])
-            iptables = Popen(cmd.split(), stdout = PIPE)
-            iptables.wait()
-            if iptables.poll() == 0:
-                print_notify("close", port[0], port[1], True)
-                PORTS.discard(port)
-            else:
-                print_notify("close", port[0], port[1], False)
+    cmd = CLOSE_CMD.format(proto = port[0], dport = port[1])
+    iptables = Popen(cmd.split(), stdout = PIPE)
+    iptables.wait()
+    if iptables.poll() == 0:
+        PORTS.discard(port)
+        return True
+    else:
+        return False
 
 def main_function():
     """
     Main Thread
     """
     app_pid = int(sys.argv[1])
-    netstat_pattern = NETSTAT_PATTERN % app_pid
-    port_finder = re.compile(netstat_pattern, re.VERBOSE).findall
+    lsof_cmd = LSOF_CMD.format(pid=app_pid)
     proc_path = os.path.join("/proc", str(app_pid))
     app_path = os.path.realpath(os.path.join(proc_path, "exe"))
+    allowed_ports = ALLOWED_APPS[app_path]
     try:
         while not PORTS:
-            update_ports(port_finder, app_path)
+            update_ports(lsof_cmd, allowed_ports)
             sleep(2)
         while os.path.exists(proc_path):
             sleep(20)
-            update_ports(port_finder, app_path)
+            update_ports(lsof_cmd, allowed_ports)
     finally:
-        update_firewall(to_close=PORTS.copy())
+        for port in PORTS.copy():
+            status = fw_close(port)
+            print_notify("close", port[0], port[1], status)
         sys.exit(0)
 
 def parse_config():
@@ -125,15 +114,15 @@ def parse_config():
     config = ConfigParser.RawConfigParser()
     config.read(CONFIG_FILE)
     for program in config.sections():
-        allowed_apps[program] = set ([ 
-            tuple ([
+        allowed_apps[program] = set([ 
+            tuple([
                 port.split('/')[1],
-                int (port.split('/')[0])
+                int(port.split('/')[0])
             ]) for port in config.get(program,"ports").split()
         ])
     return allowed_apps
 
 if __name__ == "__main__":
     ALLOWED_APPS = parse_config()
-    PORTS = set ()
+    PORTS = set()
     main_function()
