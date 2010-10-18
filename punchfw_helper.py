@@ -6,7 +6,7 @@ import os
 import sys
 from subprocess import Popen, PIPE
 from time import sleep
-import ConfigParser
+import configparser
 
 CONFIG_FILE = "/etc/punchfw.cfg"
 OPEN_CMD = "/usr/sbin/iptables -A INPUT -p {proto} --dport {dport} -j ACCEPT"
@@ -111,7 +111,7 @@ def parse_config():
     Parse the configuration file and return a list of allowed applications.
     """
     allowed_apps = {}
-    config = ConfigParser.RawConfigParser()
+    config = configparser.RawConfigParser()
     config.read(CONFIG_FILE)
     for program in config.sections():
         allowed_apps[program] = set([ 

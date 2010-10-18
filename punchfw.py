@@ -103,6 +103,6 @@ def main_function():
     
 if __name__ == "__main__":
     if not os.path.exists(CONFIG_FILE):
-        print "You need to create a configuration file"
+        print("You need to create a configuration file")
         exit(1)
     main_function()
