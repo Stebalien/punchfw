@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 """
 Runs a program and opens ports as needed and allowed by the
 configuration file.
