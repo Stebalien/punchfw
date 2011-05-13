@@ -110,7 +110,7 @@ def parse_config():
     """
     Parse the configuration file and return a list of allowed applications.
     """
-    allowed_apps = {}
+    allowed_apps = dict()
     config = configparser.RawConfigParser()
     config.read(CONFIG_FILE)
     for program in config.sections():

@@ -1,3 +1,0 @@
-1. Add Your programs to the configuration file (/etc/punchfw.cfg)
-    -> see the configuration file for details
-2. Start your programs with punchfw.py <program-name>
